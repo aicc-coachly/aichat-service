@@ -9,6 +9,12 @@ from langchain.schema import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationSummaryMemory
 from dotenv import load_dotenv
+from sqlalchemy.future import select
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from database import get_user_inbody_from_db
+from model import ChatMessage
+
 
 # 환경 변수 로드
 load_dotenv()
@@ -49,21 +55,21 @@ template = """ 당신은 전문적인 AI 헬스트레이너입니다. 사용자�
      - **초급자**: 기본적인 운동 동작으로 구성된 루틴 제공
      - **중급자**: 보다 복잡한 운동 동작과 조합 제공
 
-4. **트레이너 추천**:
-   - 사용자가 트레이너 정보를 요청할 경우, 사용자의 위치와 필요에 맞는 세 명의 트레이너를 추천합니다.
-   - 추천하는 트레이너의 정보는 다음과 같이 구성합니다:
-     - **이름**: 트레이너의 전체 이름
-     - **전문 분야**: 해당 트레이너의 주요 전문 영역 (예: 다이어트, 근력 훈련, 유연성 향상)
-     - **위치**: 트레이너가 활동하는 지역 (예: 서울시 강남구)
-     - **가격**: 서비스 요금 (예: 1회당 가격, 주간 패키지 등)
-     - **자격증 및 경력**: 트레이너의 자격증, 경력 및 특별한 서비스나 접근 방식에 대한 설명
-   - 추천 시 "고객님에게 알맞은 트레이너 세 분을 소개해 드리겠습니다."라는 문구를 사용합니다.
-   - 사용자가 트레이너 정보를 요구하지 않는다면 트레이너를 소개하지 않습니다.
-   - 사용자가 원하는 조건에 충족하는 트레이너가 존재하지 않는다면 조건에 알맞은 트레이너가 없습니다. 라는 문구가 나와야합니다.
+# 4. **트레이너 추천**:
+#    - 사용자가 트레이너 정보를 요청할 경우, 사용자의 위치와 필요에 맞는 세 명의 트레이너를 추천합니다.
+#    - 추천하는 트레이너의 정보는 다음과 같이 구성합니다:
+#      - **이름**: 트레이너의 전체 이름
+#      - **전문 분야**: 해당 트레이너의 주요 전문 영역 (예: 다이어트, 근력 훈련, 유연성 향상)
+#      - **위치**: 트레이너가 활동하는 지역 (예: 서울시 강남구)
+#      - **가격**: 서비스 요금 (예: 1회당 가격, 주간 패키지 등)
+#      - **자격증 및 경력**: 트레이너의 자격증, 경력 및 특별한 서비스나 접근 방식에 대한 설명
+#    - 추천 시 "고객님에게 알맞은 트레이너 세 분을 소개해 드리겠습니다."라는 문구를 사용합니다.
+#    - 사용자가 트레이너 정보를 요구하지 않는다면 트레이너를 소개하지 않습니다.
+#    - 사용자가 원하는 조건에 충족하는 트레이너가 존재하지 않는다면 조건에 알맞은 트레이너가 없습니다. 라는 문구가 나와야합니다.
 
-5. **첫 응답 규칙**:
-   - 트레이너 정보를 제공할 때 첫 번째 응답에서만 "고객님에게 알맞은 트레이너 세 분을 소개해 드리겠습니다."라는 문구를 사용합니다.
-   - 이후 대화에서는 이 문구를 반복하지 않고 자연스럽게 정보를 제공합니다.
+# 5. **첫 응답 규칙**:
+#    - 트레이너 정보를 제공할 때 첫 번째 응답에서만 "고객님에게 알맞은 트레이너 세 분을 소개해 드리겠습니다."라는 문구를 사용합니다.
+#    - 이후 대화에서는 이 문구를 반복하지 않고 자연스럽게 정보를 제공합니다.
 
 6. **대화 흐름 유지**:
    - 사용자의 반응에 따라 추가 질문이나 대안을 제안하여 대화를 매끄럽게 이어갑니다.
@@ -109,36 +115,18 @@ template = """ 당신은 전문적인 AI 헬스트레이너입니다. 사용자�
 
 #Answer:"""
 
-def get_trainers_from_api():
-    try:
-        response = requests.get(TRAINER_API_URL)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        print(f"API 요청 중 오류 발생: {e}")
-        return []
+async def create_rag_chain(user_id: int, user_question: str, db: AsyncSession):
+    # 사용자 인바디 정보 가져오기
+    user_inbody_info = await get_user_inbody_from_db(user_id, db) if user_id else None
 
-def get_user_inbody_from_api(user_id):
-    try:
-        response = requests.get(f"{INBODY_API_URL}/{user_id}")
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        print(f"인바디 API 요청 중 오류 발생: {e}")
-        return None
+    # 빈 Document 리스트 생성 (필요시 추가 내용 조정)
+    documents = [Document(page_content="운동 관련 정보")]  # 기본 테스트 문서 예시
 
-def create_rag_chain(user_id, user_question):
-   
-    trainers_data = get_trainers_from_api()
-
-    user_inbody_info = get_user_inbody_from_api(user_id) if user_id else None
-
-    # 트레이너 정보를 Document 객체로 변환
-    documents = [Document(page_content=f"{trainer['name']}의 정보: {trainer['trainer_resume']}", metadata=trainer) for trainer in trainers_data]
+    # 텍스트 분할 (원문에 문서가 있을 때 텍스트 분할을 위한 예시)
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     texts = text_splitter.split_documents(documents)
 
-    # 벡터 임베딩 및 검색기 생성
+    # FAISS 벡터 스토어를 documents와 함께 생성
     embedding = OpenAIEmbeddings()
     vectorstore = FAISS.from_documents(documents=texts, embedding=embedding)
     retriever = vectorstore.as_retriever()
@@ -150,17 +138,29 @@ def create_rag_chain(user_id, user_question):
 
     # 대화 기록을 불러와서 사용자 질문에 답변 생성
     chat_history = memory.load_memory_variables({}).get("chat_history", [])
-    context = retriever.invoke(user_question)
+    context = ""  # 기본 컨텍스트는 빈 문자열로 설정
 
     # 인바디 정보가 있는 경우 추가
     if user_inbody_info:
         context += f"\n사용자 인바디 정보: {user_inbody_info}"
 
-    response = prompt.format(
+    # AI 모델에서 응답 생성
+    response_text = prompt.format(
         chat_history=chat_history,
         question=user_question,
         context=context
     )
-    response = llm.invoke(response)
-    memory.save_context({"input": user_question}, {"output": response.content})
+    response = llm.invoke(response_text)
+
+    try:
+        # 유저 메시지와 AI 응답을 DB에 저장
+        user_message = ChatMessage(sender_name="User", content=user_question, room_id=user_id)
+        ai_response = ChatMessage(sender_name="AI", content=response.content, room_id=user_id)
+        db.add_all([user_message, ai_response])
+        await db.commit()
+
+    except Exception as e:
+        await db.rollback()
+        print(f"메시지를 저장하는 중 오류 발생: {e}")
+
     return response.content

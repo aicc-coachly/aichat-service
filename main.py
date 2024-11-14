@@ -46,39 +46,49 @@ message_cache = {}
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(get_db)):
     await websocket.accept()
-    user_id = None
+    room_id = None
     try:
         while True:
-            # 클라이언트에서 JSON 형식으로 user_id와 question을 받아 처리
+            # 클라이언트에서 JSON 형식으로 room_id question을 받아 처리
             data = await websocket.receive_json()
-            user_id = data.get("user_id")
+            room_id = data.get("room_id")
             question = data.get("question")
             
             # AI 응답 생성
-            response = create_rag_chain(user_id, question)
+            response = await create_rag_chain(room_id, question, db)
             
             # 응답을 캐시에 추가
-            if user_id not in message_cache:
-                message_cache[user_id] = []
-            message_cache[user_id].append({"question": question, "response": response})
+            if room_id not in message_cache:
+                message_cache[room_id] = []
+            message_cache[room_id].append({"question": question, "response": response})
             
             # 응답을 클라이언트에 JSON 형식으로 전송
             await websocket.send_json({"response": response})
     except WebSocketDisconnect:
-        print(f"{user_id}와의 연결이 끊어졌습니다.")
+        print(f"{room_id}와의 연결이 끊어졌습니다.")
         # 연결이 끊어지면 캐시된 메시지를 데이터베이스에 저장
-        if user_id and user_id in message_cache:
-            await save_messages_to_db(user_id, message_cache[user_id], db)
+        if room_id and room_id in message_cache:
+            await save_messages_to_db(room_id, message_cache[room_id], db)
             # 저장 후 캐시에서 해당 메시지 삭제
-            del message_cache[user_id]
+            del message_cache[room_id]
+    except Exception as e:
+        print(f"WebSocket 처리 중 오류 발생: {e}")  # 추가된 예외 로깅
 
-async def save_messages_to_db(user_id, messages, db: AsyncSession):
+async def save_messages_to_db(room_id, messages, db: AsyncSession):
     """채팅 메시지를 데이터베이스에 저장하는 함수"""
     for msg in messages:
         db_message = ChatMessage(
-            user_id=user_id,
-            question=msg["question"],
-            response=msg["response"]
+            room_id=room_id,
+            sender_name="User",
+            content=msg["question"]
         )
         db.add(db_message)
+
+        ai_response = ChatMessage(
+            room_id=room_id,
+            sender_name="AI",
+            content=msg["response"]
+        )
+        db.add(ai_response)
+
     await db.commit()
