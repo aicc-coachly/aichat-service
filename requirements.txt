@@ -1,0 +1,11 @@
+fastapi 
+"uvicorn[standard]" 
+pydantic 
+requests 
+langchain 
+langchain-openai 
+langchain-core 
+langchain-community 
+faiss-cpu 
+openai 
+python-dotenv
