@@ -10,6 +10,7 @@ from model import ChatMessage
 from model import ChatRoom
 
 app = FastAPI()
+
 class ChatRoomRequest(BaseModel):
     user_number: int
 
@@ -38,8 +39,6 @@ async def create_or_get_chat_room(request: ChatRoomRequest, db: AsyncSession = D
         print(e)  # 오류 메시지 로그
         raise HTTPException(status_code=500, detail="Failed to create or retrieve chat room")
 
-
-
 # 사용자 메시지 캐시용 딕셔너리
 message_cache = {}
 
@@ -49,7 +48,7 @@ async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(ge
     room_id = None
     try:
         while True:
-            # 클라이언트에서 JSON 형식으로 room_id question을 받아 처리
+            # 클라이언트에서 JSON 형식으로 room_id와 question을 받아 처리
             data = await websocket.receive_json()
             room_id = data.get("room_id")
             question = data.get("question")
@@ -57,25 +56,33 @@ async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(ge
             # AI 응답 생성
             response = await create_rag_chain(room_id, question, db)
             
-            # 응답을 캐시에 추가
+            # 캐시 상태 초기화 및 저장 플래그 추가
             if room_id not in message_cache:
-                message_cache[room_id] = []
-            message_cache[room_id].append({"question": question, "response": response})
+                message_cache[room_id] = {"messages": [], "saved": False}
+            
+            # 캐시에 질문과 응답 저장
+            message_cache[room_id]["messages"].append({"question": question, "response": response})
+            print(f"[DEBUG] Message cached for room {room_id}. Cached messages count: {len(message_cache[room_id]['messages'])}")
             
             # 응답을 클라이언트에 JSON 형식으로 전송
             await websocket.send_json({"response": response})
     except WebSocketDisconnect:
-        print(f"{room_id}와의 연결이 끊어졌습니다.")
-        # 연결이 끊어지면 캐시된 메시지를 데이터베이스에 저장
-        if room_id and room_id in message_cache:
-            await save_messages_to_db(room_id, message_cache[room_id], db)
-            # 저장 후 캐시에서 해당 메시지 삭제
-            del message_cache[room_id]
+        print(f"[DEBUG] WebSocket disconnected for room {room_id}.")
+        
+        # DB 저장 시 플래그 확인
+        if room_id and room_id in message_cache and not message_cache[room_id]["saved"]:
+            await save_messages_to_db(room_id, message_cache[room_id]["messages"], db)
+            
+            # 플래그 설정 및 캐시에서 삭제
+            message_cache[room_id]["saved"] = True
+            message_cache.pop(room_id, None)
+            print(f"[DEBUG] Messages saved to DB for room {room_id}. Saved flag set and cache cleared.")
     except Exception as e:
-        print(f"WebSocket 처리 중 오류 발생: {e}")  # 추가된 예외 로깅
+        print(f"WebSocket 처리 중 오류 발생: {e}")
 
 async def save_messages_to_db(room_id, messages, db: AsyncSession):
     """채팅 메시지를 데이터베이스에 저장하는 함수"""
+    print(f"[DEBUG] Saving messages to DB for room {room_id}. Messages count: {len(messages)}")
     for msg in messages:
         db_message = ChatMessage(
             room_id=room_id,
@@ -92,3 +99,4 @@ async def save_messages_to_db(room_id, messages, db: AsyncSession):
         db.add(ai_response)
 
     await db.commit()
+    print(f"[DEBUG] DB commit complete for room {room_id}.")
