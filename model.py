@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
-from database import Base
+from db_setup import Base
 
 class ChatRoom(Base):
     __tablename__ = "chat_room"
@@ -17,3 +17,11 @@ class ChatMessage(Base):
     question = Column(Text, nullable=False)
     response = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
+
+class TrainerImage(Base):
+    __tablename__ = "trainer_image"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trainer_number = Column(Integer, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
+    resume = Column(String, nullable=True)
