@@ -8,6 +8,7 @@ dist/
 build/
 
 # Virtual Environment
+AiChat
 venv/
 env/
 .venv/
