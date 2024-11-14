@@ -58,7 +58,6 @@ poetry.lock
 # Docker and Kubernetes
 docker-compose.override.yml
 .Dockerfile.swp
-Dockerfile
 *.dockerenv
 .env.docker
 .k8s.yaml
