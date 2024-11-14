@@ -53,9 +53,10 @@ async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(ge
             data = await websocket.receive_json()
             user_id = data.get("user_id")
             question = data.get("question")
+            keyword = data.get("keyword")  # 클라이언트에서 keyword 값을 받아옴
             
             # AI 응답 생성
-            response = create_rag_chain(user_id, question)
+            response = await create_rag_chain(user_id, question, keyword, db)
             
             # 응답을 캐시에 추가
             if user_id not in message_cache:
@@ -72,11 +73,11 @@ async def websocket_endpoint(websocket: WebSocket, db: AsyncSession = Depends(ge
             # 저장 후 캐시에서 해당 메시지 삭제
             del message_cache[user_id]
 
-async def save_messages_to_db(user_id, messages, db: AsyncSession):
+async def save_messages_to_db(room_id, messages, db: AsyncSession):
     """채팅 메시지를 데이터베이스에 저장하는 함수"""
     for msg in messages:
         db_message = ChatMessage(
-            user_id=user_id,
+            room_id=room_id,
             question=msg["question"],
             response=msg["response"]
         )

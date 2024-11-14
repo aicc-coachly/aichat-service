@@ -9,6 +9,8 @@ from langchain.schema import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationSummaryMemory
 from dotenv import load_dotenv
+from database import fetch_trainers_by_keyword
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # 환경 변수 로드
 load_dotenv()
@@ -127,16 +129,26 @@ def get_user_inbody_from_api(user_id):
         print(f"인바디 API 요청 중 오류 발생: {e}")
         return None
 
-def create_rag_chain(user_id, user_question):
-   
-    trainers_data = get_trainers_from_api()
-
-    user_inbody_info = get_user_inbody_from_api(user_id) if user_id else None
+async def create_rag_chain(room_id: str, user_question: str, keyword: str, db: AsyncSession):
+    # 키워드를 사용하여 트레이너 데이터베이스에서 정보 조회
+    trainers_data = await fetch_trainers_by_keyword(keyword, db)
 
     # 트레이너 정보를 Document 객체로 변환
-    documents = [Document(page_content=f"{trainer['name']}의 정보: {trainer['trainer_resume']}", metadata=trainer) for trainer in trainers_data]
+    documents = [
+        Document(
+            page_content=f"{trainer.get('name', '정보 없음')}의 정보: {trainer.get('resume', trainer.get('specialty', '정보 없음'))}",
+            metadata=trainer
+        )
+        for trainer in trainers_data
+    ]
+    
+    # 텍스트 분할
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     texts = text_splitter.split_documents(documents)
+
+    # texts가 비어 있는 경우 처리
+    if not texts:
+        return "관련 정보를 찾을 수 없습니다."
 
     # 벡터 임베딩 및 검색기 생성
     embedding = OpenAIEmbeddings()
@@ -151,10 +163,6 @@ def create_rag_chain(user_id, user_question):
     # 대화 기록을 불러와서 사용자 질문에 답변 생성
     chat_history = memory.load_memory_variables({}).get("chat_history", [])
     context = retriever.invoke(user_question)
-
-    # 인바디 정보가 있는 경우 추가
-    if user_inbody_info:
-        context += f"\n사용자 인바디 정보: {user_inbody_info}"
 
     response = prompt.format(
         chat_history=chat_history,
