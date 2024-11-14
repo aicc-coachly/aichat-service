@@ -5,7 +5,7 @@ from database import Base
 class ChatRoom(Base):
     __tablename__ = "chat_room"
 
-    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, primary_key=True, index=True)
     user_number = Column(Integer, nullable=False, index=True)  # 유저 넘버 필드
     trainer_number = Column(Integer, nullable=True)  # 트레이너 넘버, 기본값은 NULL
 
