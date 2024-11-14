@@ -1,10 +1,41 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.exc import SQLAlchemyError
 from chat import create_rag_chain  # AI 응답 생성 함수
 from database import get_db  # 데이터베이스 연결 가져오기
+
+
 from model import ChatMessage
+from model import ChatRoom
 
 app = FastAPI()
+
+@app.post("/chat-room/")
+async def create_or_get_chat_room(user_number: int, db: AsyncSession = Depends(get_db)):
+    try:
+        # 기존에 유저 넘버가 같고 트레이너가 NULL인 채팅방이 있는지 확인
+        query = select(ChatRoom).where(ChatRoom.user_number == user_number, ChatRoom.trainer_number == None)
+        result = await db.execute(query)
+        existing_chat_room = result.scalars().first()
+
+        if existing_chat_room:
+            # 이미 존재하는 채팅방이 있다면, 해당 채팅방의 ID를 반환
+            return {"message": "Chat room already exists", "chat_room_id": existing_chat_room.id}
+
+        # 존재하지 않으면 새로운 채팅방 생성
+        new_chat_room = ChatRoom(user_number=user_number, trainer_number=None)
+        db.add(new_chat_room)
+        await db.commit()
+        await db.refresh(new_chat_room)
+        
+        return {"message": "New chat room created", "chat_room_id": new_chat_room.id}
+
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to create or retrieve chat room")
+
+
 
 # 사용자 메시지 캐시용 딕셔너리
 message_cache = {}
